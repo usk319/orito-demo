@@ -9,7 +9,6 @@
     <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
     <style>
         :root { --green: #00B900; --yellow: #FFD32A; --red: #ff4757; --blue: #007bff; --web3: #8247E5; }
@@ -23,14 +22,14 @@
         body.mode-split #map-area { flex: 0.4; }
         .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
         .photo-item { position: relative; border-radius: 10px; overflow: hidden; aspect-ratio: 4/3; border: 3px solid transparent; transition: 0.3s; }
-        .photo-item.highlight { border-color: var(--blue); transform: scale(1.02); box-shadow: 0 0 15px rgba(0,123,255,0.5); z-index: 10; }
+        .photo-item.highlight { border-color: var(--blue); transform: scale(1.02); box-shadow: 0 0 15px rgba(0,123,255,0.5); }
         .photo-item img { width: 100%; height: 100%; object-fit: cover; }
         .photo-badge { position: absolute; top: 5px; left: 5px; background: var(--blue); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
         .input-field { width: 100%; padding: 15px; border: 1px solid #ddd; border-radius: 12px; margin-bottom: 10px; font-size: 16px; outline: none; }
         .btn { width: 100%; padding: 18px; border: none; border-radius: 14px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 10px; }
         .btn-primary { background: var(--green); color: white; }
         .btn-danger { background: #fff; color: var(--red); border: 2px solid var(--red); }
-        .btn-outline { background: transparent; color: #999; border: 1px solid #ddd; font-size: 11px; padding: 8px; margin-top: 30px; }
+        .btn-outline { background: transparent; color: #999; border: 1px solid #ddd; font-size: 11px; padding: 8px; margin-top: 20px; }
         .sig-container { background: #f9f9f9; padding: 15px; border-radius: 15px; margin-bottom: 10px; }
         .sig-box { border: 2px dashed #ccc; background: #fff; border-radius: 10px; touch-action: none; width: 100%; height: 110px; }
         #pdf-progress { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); display: none; align-items: center; justify-content: center; z-index: 10000; flex-direction: column; font-weight: bold; }
@@ -43,14 +42,13 @@
 <div id="entry-view" class="view active" style="align-items:center; justify-content:center; padding:30px;">
     <h1 style="color:var(--green); margin-bottom:0;">織杜 - ORITO</h1>
     <p style="margin-top:5px; color:#666;">境界リレー合意システム</p>
-    <input type="text" id="invite-input" class="input-field" style="text-align:center; font-size:24px; letter-spacing:5px;" placeholder="ORITO1">
+    <input type="text" id="invite-input" class="input-field" style="text-align:center; font-size:24px; letter-spacing:5px;" placeholder="ORITO001">
     <button class="btn btn-primary" onclick="verifyCode()">境界を確認する</button>
-    
-    <button class="btn btn-outline" onclick="resetDemoData()">デモ用：この招待コードの土地を初期化</button>
+    <button class="btn btn-outline" onclick="resetDemoData()">デモ用：入力中の土地を初期化</button>
 </div>
 
 <div id="kyc-view" class="view" style="padding:20px;">
-    <h3 id="kyc-title">本人確認 & 住所入力</h3>
+    <h3>本人確認 & 住所入力</h3>
     <p id="role-label" style="font-size:14px; font-weight:bold; color:var(--web3);"></p>
     <input type="text" id="current-address" class="input-field" placeholder="現住所（署名用）">
     <div style="background:#f9f9f9; padding:20px; border-radius:15px; border:1px solid #eee; margin-bottom:15px; text-align:center;">
@@ -67,9 +65,11 @@
     <div id="detail-area">
         <h2 id="parcel-name" style="margin:0;">地番：---</h2>
         <div id="photo-list" class="photo-grid"></div>
-        <textarea id="owner-msg" class="input-field" style="height:60px;" placeholder="メッセージ・要望があれば入力"></textarea>
-        <button class="btn btn-primary" onclick="changeView('agree-view')">合意署名へ進む</button>
-        <button class="btn btn-danger" onclick="finalizeProcess(false)">今回は合意しない</button>
+        <textarea id="owner-msg" class="input-field" style="height:60px;" placeholder="要望・メッセージを入力"></textarea>
+        <div id="agree-actions">
+            <button class="btn btn-primary" onclick="changeView('agree-view')">合意署名へ進む</button>
+            <button class="btn btn-danger" onclick="finalizeProcess(false)">今回は合意しない</button>
+        </div>
         <button class="btn" style="background:#eee;" onclick="closeDetail()">✕ 閉じる</button>
     </div>
 </div>
@@ -116,19 +116,19 @@
         if (error || !data) return alert("招待コードが無効です。");
         targetData = data;
         
-        // 役割判定：甲(署名a)がまだなら甲。甲が終わっていて乙(署名b)がまだなら乙。
+        // ★デモ用：完了していても地図は見れるようにし、ボタンを隠す
+        const isFinished = data.sig_a_done && data.sig_b_done;
+        
         if (!data.sig_a_done) {
             isOwner = true;
-        } else if (!data.sig_b_done) {
-            isOwner = false;
         } else {
-            alert("この土地の合意は既に完了しています。リセットしてから再度お試しください。");
-            return;
+            isOwner = false;
         }
         
         const roleName = isOwner ? "【所有者（甲）】" : "【隣接所有者（乙）】";
         document.getElementById('sign-role').innerText = roleName + "として署名します";
-        document.getElementById('role-label').innerText = "あなたは " + roleName + " です";
+        document.getElementById('role-label').innerText = isFinished ? "合意完了済み" : "あなたは " + roleName + " です";
+        document.getElementById('agree-actions').style.display = isFinished ? 'none' : 'block';
         document.getElementById('current-address').value = isOwner ? (data.owner_address || "") : (data.adjacent_address || "");
         
         changeView('kyc-view');
@@ -137,10 +137,9 @@
     async function resetDemoData() {
         const code = document.getElementById('invite-input').value.toUpperCase().trim();
         if (!code) return alert("初期化したいコードを入力してください");
-        if (!confirm(code + " のデータを完全に削除して赤色に戻しますか？")) return;
-
+        
         document.getElementById('pdf-progress').style.display = 'flex';
-        document.getElementById('progress-text').innerText = "初期化中...";
+        document.getElementById('progress-text').innerText = "リセット中...";
 
         const { error } = await supabaseClient.from('forest_plots').update({
             sig_a_done: false, sig_a_data: null, owner_line_id: null, owner_address: null, owner_requests: null,
@@ -170,7 +169,7 @@
         mapInstance.on('load', async () => {
             const { data: geoData } = await supabaseClient.rpc('get_forest_geojson');
             
-            // ★デモ用：今入力したコードの土地、または自分が署名に関わった土地のみを表示
+            // ★デモ制限：今入力したコードの土地、または自分が過去に署名したものだけ表示
             const filtered = geoData.features.filter(f => {
                 const p = f.properties;
                 return p.id === targetData.id || p.owner_line_id === lineUserId || p.adjacent_line_id === lineUserId;
@@ -178,20 +177,20 @@
 
             const colorExpr = [
                 'case',
-                ['==', ['get', 'is_agreed'], false], '#ff4757', // 否認
-                ['all', ['==', ['get', 'sig_a_done'], true], ['==', ['get', 'sig_b_done'], true]], '#00B900', // 緑
-                ['==', ['get', 'sig_a_done'], true], '#FFD32A', // 黄色
-                '#ff4757' // 赤
+                ['==', ['get', 'is_agreed'], false], '#ff4757',
+                ['all', ['==', ['get', 'sig_a_done'], true], ['==', ['get', 'sig_b_done'], true]], '#00B900',
+                ['==', ['get', 'sig_a_done'], true], '#FFD32A',
+                '#ff4757'
             ];
 
             mapInstance.addSource('plot-src', { 'type': 'geojson', 'data': { type: "FeatureCollection", features: filtered } });
             mapInstance.addLayer({ 'id': 'fill', 'type': 'fill', 'source': 'plot-src', 'paint': { 'fill-opacity': 0.25, 'fill-color': colorExpr } });
             mapInstance.addLayer({ 'id': 'line', 'type': 'line', 'source': 'plot-src', 'paint': { 'line-color': colorExpr, 'line-width': 5 } });
 
-            const photos = getUrls(targetData.evidence_photo_url);
             const myFeat = filtered.find(f => f.properties.id === targetData.id);
             if(myFeat) {
                 let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
+                const photos = getUrls(targetData.evidence_photo_url);
                 const pointFeatures = photos.map((url, i) => ({
                     "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[Math.floor((i / photos.length) * (ring.length - 1))] },
                     "properties": { "idx": (i + 1).toString() }
@@ -285,7 +284,7 @@
         if (updated.sig_a_done && updated.sig_b_done && updated.is_agreed !== false) {
             await generateAndSendPDF(updated);
         } else {
-            alert(isAgreed ? "署名を記録しました。" : "否認を記録しました。");
+            alert(isAgreed ? "署名を記録しました。" : "合意見送りを記録しました。");
             window.location.reload();
         }
     }
@@ -298,8 +297,8 @@
             <div style="padding:15mm; font-family: serif; line-height:1.4; background:white; color:#000;">
                 <h1 style="text-align:center; text-decoration:underline;">山林境界合意並びに森林現況確認証明書</h1>
                 <table style="width:100%; border-collapse:collapse; margin:10px 0; border:2px solid #000;">
-                    <tr><td style="background:#eee; padding:10px; border:1px solid #000; width:20%;">地番</td><td colspan="3" style="padding:10px; border:1px solid #000; font-weight:bold;">${plot.parcel_number}</td></tr>
-                    <tr><td style="background:#eee; padding:10px; border:1px solid #000;">面積</td><td style="padding:10px; border:1px solid #000;">${plot.area_ha} ha</td><td style="background:#eee; padding:10px; border:1px solid #000;">樹種</td><td style="padding:10px; border:1px solid #000;">${plot.tree_species || 'スギ'}</td></tr>
+                    <tr><td style="background:#eee; padding:8px; border:1px solid #000; width:20%;">地番</td><td colspan="3" style="padding:10px; border:1px solid #000; font-weight:bold;">${plot.parcel_number}</td></tr>
+                    <tr><td style="background:#eee; padding:8px; border:1px solid #000;">面積</td><td style="padding:10px; border:1px solid #000;">${plot.area_ha} ha</td><td style="background:#eee; padding:8px; border:1px solid #000;">樹種</td><td style="padding:10px; border:1px solid #000;">${plot.tree_species || 'スギ'}</td></tr>
                 </table>
                 <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4;">■ 境界確認図</h4>
                 <div style="text-align:center; border:1px solid #000;"><img src="${mapImg}" style="width:100%; height:320px; object-fit:cover;"></div>
@@ -335,8 +334,7 @@
                 img.onload=()=>{ const c=document.createElement("canvas"); c.width=img.width; c.height=img.height; c.getContext("2d").drawImage(img,0,0); res(c.toDataURL("image/jpeg")); };
                 img.src=u;
             });
-            // 縦横比を維持（ object-fit: contain ）
-            photoDiv.innerHTML += `<div style="text-align:center; border:1px solid #eee; background:#fafafa; padding:5px;"><img src="${b64}" style="width:100%; height:160px; object-fit:contain; display:block;"></div>`;
+            photoDiv.innerHTML += `<div style="text-align:center; border:1px solid #eee; padding:5px;"><img src="${b64}" style="width:100%; height:160px; object-fit:contain; display:block;"></div>`;
         }
 
         const pdfBlob = await html2pdf().set({ margin:0, html2canvas:{scale:2, useCORS:true}, jsPDF:{unit:'mm', format:'a4'} }).from(template).output('blob');
