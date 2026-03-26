@@ -12,7 +12,7 @@
 
     <style>
         :root { --green: #00B900; --yellow: #FFD32A; --red: #ff4757; --blue: #007bff; --web3: #8247E5; }
-        body { margin: 0; font-family: "Hiragino Mincho ProN", serif; background: #fff; overflow: hidden; height: 100vh; width: 100vw; }
+        body { margin: 0; font-family: "Hiragino Mincho ProN", "MS Mincho", serif; background: #fff; overflow: hidden; height: 100vh; width: 100vw; }
         .view { display: none; height: 100vh; flex-direction: column; overflow-y: auto; }
         .view.active { display: flex; }
         #map-area { flex: 1; position: relative; width: 100%; min-height: 40vh; }
@@ -44,13 +44,13 @@
     <p style="margin-top:5px; color:#666;">境界リレー合意システム</p>
     <input type="text" id="invite-input" class="input-field" style="text-align:center; font-size:24px; letter-spacing:5px;" placeholder="ORITO001">
     <button class="btn btn-primary" onclick="verifyCode()">境界を確認する</button>
-    <button class="btn btn-outline" onclick="resetDemoData()">デモ用：この招待コードの土地を初期化</button>
+    <button class="btn btn-outline" onclick="resetDemoData()">デモ用：入力中の土地を初期化</button>
 </div>
 
 <div id="kyc-view" class="view" style="padding:20px;">
-    <h3 id="kyc-title">本人確認 & 住所入力</h3>
+    <h3>本人確認 & 住所入力</h3>
     <p id="role-label" style="font-size:14px; font-weight:bold; color:var(--web3);"></p>
-    <input type="text" id="current-address" class="input-field" placeholder="現住所（住民票記載の住所）">
+    <input type="text" id="current-address" class="input-field" placeholder="現住所（署名に使用します）">
     <div style="background:#f9f9f9; padding:20px; border-radius:15px; border:1px solid #eee; margin-bottom:15px; text-align:center;">
         <p style="font-size:11px; margin-bottom:10px;">身分証明書 (eKYC) の撮影</p>
         <button class="btn" style="background:#fff;" onclick="document.getElementById('file-kyc').click()">📷 カメラ起動</button>
@@ -116,12 +116,12 @@
         if (error || !data) return alert("招待コードが無効です。");
         targetData = data;
         
-        const isFinished = data.sig_a_done && data.sig_b_done;
         isOwner = !data.sig_a_done;
+        const isFinished = data.sig_a_done && data.sig_b_done;
         
         const roleName = isOwner ? "【所有者（甲）】" : "【隣接所有者（乙）】";
         document.getElementById('sign-role').innerText = roleName + "として署名します";
-        document.getElementById('role-label').innerText = isFinished ? "合意完了済み" : "あなたは " + roleName + " です";
+        document.getElementById('role-label').innerText = isFinished ? "本土地の合意手続きは完了しています" : "あなたは " + roleName + " です";
         document.getElementById('agree-actions').style.display = isFinished ? 'none' : 'block';
         document.getElementById('current-address').value = isOwner ? (data.owner_address || "") : (data.adjacent_address || "");
         
@@ -130,9 +130,9 @@
 
     async function resetDemoData() {
         const code = document.getElementById('invite-input').value.toUpperCase().trim();
-        if (!code) return alert("招待コードを入力してから初期化してください");
+        if (!code) return alert("コードを入力してください");
         document.getElementById('pdf-progress').style.display = 'flex';
-        document.getElementById('progress-text').innerText = "リセット中...";
+        document.getElementById('progress-text').innerText = "初期化中...";
         await supabaseClient.from('forest_plots').update({
             sig_a_done: false, sig_a_data: null, owner_line_id: null, owner_address: null, owner_requests: null,
             sig_b_done: false, sig_b_data: null, adjacent_line_id: null, adjacent_address: null, is_agreed: null
@@ -154,10 +154,14 @@
         mapInstance.on('load', async () => {
             const { data: geoData } = await supabaseClient.rpc('get_forest_geojson');
             
-            // ★閲覧制限：入力したコードの土地、または自分が過去に関わったもの「以外」は排除
+            // ★超厳密フィルター：
+            // 1. 今入力したコードのID
+            // 2. もしくは、過去に自分が署名に関与した土地（ラインID一致）
+            // これら「以外」は絶対に表示しない
             const filteredFeatures = geoData.features.filter(f => {
                 const p = f.properties;
-                return p.id === targetData.id || p.owner_line_id === lineUserId || p.adjacent_line_id === lineUserId;
+                return p.id === targetData.id || 
+                       (lineUserId && (p.owner_line_id === lineUserId || p.adjacent_line_id === lineUserId));
             });
 
             const colorExpr = [
@@ -169,25 +173,23 @@
             ];
 
             mapInstance.addSource('plot-src', { 'type': 'geojson', 'data': { type: "FeatureCollection", features: filteredFeatures } });
-            mapInstance.addLayer({ 'id': 'fill', 'type': 'fill', 'source': 'plot-src', 'paint': { 'fill-opacity': 0.25, 'fill-color': colorExpr } });
+            mapInstance.addLayer({ 'id': 'fill', 'type': 'fill', 'source': 'plot-src', 'paint': { 'fill-opacity': 0.3, 'fill-color': colorExpr } });
             mapInstance.addLayer({ 'id': 'line', 'type': 'line', 'source': 'plot-src', 'paint': { 'line-color': colorExpr, 'line-width': 5 } });
 
-            if(targetData) {
-                const myFeat = filteredFeatures.find(f => f.properties.id === targetData.id);
-                if(myFeat) {
-                    let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
-                    const photos = getUrls(targetData.evidence_photo_url);
-                    const pointFeatures = photos.map((url, i) => ({
-                        "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[Math.floor((i / photos.length) * (ring.length - 1))] },
-                        "properties": { "idx": (i + 1).toString() }
-                    }));
-                    mapInstance.addSource('pts-src', { 'type': 'geojson', 'data': { "type": "FeatureCollection", "features": pointFeatures } });
-                    mapInstance.addLayer({ 'id': 'pts-c', 'type': 'circle', 'source': 'pts-src', 'paint': { 'circle-radius': 12, 'circle-color': '#007bff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
-                    mapInstance.addLayer({ 'id': 'pts-l', 'type': 'symbol', 'source': 'pts-src', 'layout': { 'text-field': ['get', 'idx'], 'text-size': 11 }, 'paint': { 'text-color': '#fff' } });
-                    const bounds = new maplibregl.LngLatBounds();
-                    ring.forEach(c => bounds.extend(c));
-                    mapInstance.fitBounds(bounds, { padding: 50 });
-                }
+            const myFeat = filteredFeatures.find(f => f.properties.id === targetData.id);
+            if(myFeat) {
+                let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
+                const photos = getUrls(targetData.evidence_photo_url);
+                const pointFeatures = photos.map((url, i) => ({
+                    "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[Math.floor((i / photos.length) * (ring.length - 1))] },
+                    "properties": { "idx": (i + 1).toString() }
+                }));
+                mapInstance.addSource('pts-src', { 'type': 'geojson', 'data': { "type": "FeatureCollection", "features": pointFeatures } });
+                mapInstance.addLayer({ 'id': 'pts-c', 'type': 'circle', 'source': 'pts-src', 'paint': { 'circle-radius': 12, 'circle-color': '#007bff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+                mapInstance.addLayer({ 'id': 'pts-l', 'type': 'symbol', 'source': 'pts-src', 'layout': { 'text-field': ['get', 'idx'], 'text-size': 11 }, 'paint': { 'text-color': '#fff' } });
+                const bounds = new maplibregl.LngLatBounds();
+                ring.forEach(c => bounds.extend(c));
+                mapInstance.fitBounds(bounds, { padding: 50 });
             }
             mapInstance.on('click', 'fill', () => showDetail());
             mapInstance.on('click', 'pts-c', (e) => highlightPhoto(e.features[0].properties.idx));
@@ -271,7 +273,7 @@
         if (updated.sig_a_done && updated.sig_b_done && updated.is_agreed !== false) {
             await generateAndSendPDF(updated);
         } else {
-            alert(isAgreed ? "署名を保存しました。" : "否認を記録しました。");
+            alert(isAgreed ? "署名を保存しました。" : "合意見送りを記録しました。");
             window.location.reload();
         }
     }
@@ -281,12 +283,12 @@
         const template = document.getElementById('pdf-template');
         const mapImg = mapInstance.getCanvas().toDataURL('image/jpeg');
         template.innerHTML = `
-            <div style="padding:15mm; font-family: serif; line-height:1.5; background:white; color:#000;">
+            <div style="padding:15mm; font-family: serif; line-height:1.6; background:white; color:#000;">
                 <div style="text-align:right; font-size:12px;">証第 ${now.getTime().toString().slice(-6)} 号</div>
-                <h1 style="text-align:center; text-decoration:underline; font-size:24px; margin-bottom:30px;">山林境界合意並びに境界確定証明書</h1>
+                <h1 style="text-align:center; text-decoration:underline; font-size:24px; margin-bottom:30px;">山林境界確定合意証明書</h1>
                 
-                <p style="font-size:14px; margin-bottom:20px;">
-                本証は、不動産登記法及び森林法に基づき、地権者並びに隣接地所有者の立会いのもと、境界杭の確認を行い、相互に境界に異議なきことを合意したことを証するものである。本合意は電磁的記録として作成され、両名の署名をもって確定したものとする。
+                <p style="font-size:13px; margin-bottom:20px; line-height:1.8;">
+                不動産登記法及び森林法に基づき、地権者並びに隣接土地所有者の立会いのもと、現地における境界杭の確認調査を実施した。調査の結果、以下の土地における境界について双方異議なきことを確認し、信義誠実の原則に基づき本合意を締結したことを証明する。本証は電磁的記録として作成され、両名の署名をもって確定証憑とする。
                 </p>
 
                 <table style="width:100%; border-collapse:collapse; margin-bottom:20px; border:2px solid #000;">
@@ -294,37 +296,49 @@
                     <tr><td style="background:#eee; padding:10px; border:1px solid #000;">面積</td><td style="padding:10px; border:1px solid #000;">${plot.area_ha} ha</td><td style="background:#eee; padding:10px; border:1px solid #000;">樹種</td><td style="padding:10px; border:1px solid #000;">${plot.tree_species || 'スギ'}</td></tr>
                 </table>
 
-                <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4; margin-bottom:10px;">■ 境界確定図（実地調査図）</h4>
-                <div style="text-align:center; border:1px solid #000;"><img src="${mapImg}" style="width:100%; height:320px; object-fit:cover;"></div>
+                <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4; margin-bottom:10px;">■ 境界実地調査図</h4>
+                <div style="text-align:center; border:1px solid #000; background:#fafafa;"><img src="${mapImg}" style="width:100%; height:320px; object-fit:cover;"></div>
                 
                 <div style="page-break-before:always;"></div>
 
                 <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4; margin-top:20px;">■ 境界確定合意署名</h4>
                 <div style="display:flex; justify-content:space-around; margin-top:30px;">
                     <div style="text-align:center; width:45%;">
-                        <div style="min-height:300px; border:1px solid #eee; padding:15px; position:relative; background:#fafafa;">
-                            <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.3;">所有者印</div>
-                            <div style="text-align:left; font-size:11px; margin-top:20px; min-height:60px; line-height:1.4;"><b>住所：</b><br>${plot.owner_address || '---'}</div>
-                            <img src="${plot.sig_a_data}" style="width:130px; height:auto; max-height:140px; margin-top:15px; object-fit:contain; border-top:1px solid #ddd; padding-top:10px;">
+                        <div style="min-height:320px; border:1px solid #000; padding:15px; position:relative; background:#fff;">
+                            <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.2; position:absolute; top:20px; left:30px;">所有者印</div>
+                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:80px;">
+                                <p style="margin:0; color:#888;">【現住所】</p>
+                                ${plot.owner_address || '---'}
+                            </div>
+                            <div style="margin-top:20px; border-top:1px dashed #ccc; padding-top:10px;">
+                                <p style="margin:0 0 5px 0; font-size:10px; color:#888; text-align:left;">【自署】</p>
+                                <img src="${plot.sig_a_data}" style="width:130px; height:auto; max-height:120px; object-fit:contain;">
+                            </div>
                         </div>
                         <p style="font-weight:bold; margin-top:10px;">所有者（甲）</p>
                     </div>
                     <div style="text-align:center; width:45%;">
-                        <div style="min-height:300px; border:1px solid #eee; padding:15px; position:relative; background:#fafafa;">
-                            <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.3;">隣接者印</div>
-                            <div style="text-align:left; font-size:11px; margin-top:20px; min-height:60px; line-height:1.4;"><b>住所：</b><br>${plot.adjacent_address || '---'}</div>
-                            <img src="${plot.sig_b_data}" style="width:130px; height:auto; max-height:140px; margin-top:15px; object-fit:contain; border-top:1px solid #ddd; padding-top:10px;">
+                        <div style="min-height:320px; border:1px solid #000; padding:15px; position:relative; background:#fff;">
+                            <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.2; position:absolute; top:20px; left:30px;">隣接者印</div>
+                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:80px;">
+                                <p style="margin:0; color:#888;">【現住所】</p>
+                                ${plot.adjacent_address || '---'}
+                            </div>
+                            <div style="margin-top:20px; border-top:1px dashed #ccc; padding-top:10px;">
+                                <p style="margin:0 0 5px 0; font-size:10px; color:#888; text-align:left;">【自署】</p>
+                                <img src="${plot.sig_b_data}" style="width:130px; height:auto; max-height:120px; object-fit:contain;">
+                            </div>
                         </div>
                         <p style="font-weight:bold; margin-top:10px;">隣接所有者（乙）</p>
                     </div>
                 </div>
 
-                <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4; margin-top:30px;">■ 現地調査写真（証憑記録）</h4>
+                <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4; margin-top:30px;">■ 現地証憑写真</h4>
                 <div id="pdf-photo-area" style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px;"></div>
                 
-                <div style="margin-top:40px; text-align:center; font-size:11px; color:#666; border-top:1px solid #eee; padding-top:20px;">
-                    発行機関：株式会社 織杜 境界合意管理センター<br>
-                    認証コード：${plot.invitation_code}-${now.getTime().toString().slice(-4)}
+                <div style="margin-top:40px; text-align:center; font-size:11px; color:#666;">
+                    管理運営：株式会社 織杜 境界合意管理事務局<br>
+                    本証の正本はクラウドデータベースに安全に保管されています。
                 </div>
             </div>`;
         
@@ -336,11 +350,12 @@
                 img.onload=()=>{ const c=document.createElement("canvas"); c.width=img.width; c.height=img.height; c.getContext("2d").drawImage(img,0,0); res(c.toDataURL("image/jpeg")); };
                 img.src=u;
             });
-            photoDiv.innerHTML += `<div style="text-align:center; border:1px solid #ddd; background:#fff; padding:5px;"><img src="${b64}" style="width:100%; height:160px; object-fit:contain; display:block;"></div>`;
+            // アスペクト比を維持して枠内に収める
+            photoDiv.innerHTML += `<div style="text-align:center; border:1px solid #ddd; background:#fff; padding:5px; height:180px; display:flex; align-items:center; justify-content:center;"><img src="${b64}" style="max-width:100%; max-height:100%; object-fit:contain;"></div>`;
         }
 
         const pdfBlob = await html2pdf().set({ margin:0, html2canvas:{scale:2, useCORS:true}, jsPDF:{unit:'mm', format:'a4'} }).from(template).output('blob');
-        const fileName = `Certificate_${plot.id}_${now.getTime()}.pdf`;
+        const fileName = `Cert_${plot.id}_${now.getTime()}.pdf`;
         await supabaseClient.storage.from('pdfs').upload(fileName, pdfBlob, {contentType:'application/pdf'});
         const { data: { publicUrl } } = supabaseClient.storage.from('pdfs').getPublicUrl(fileName);
 
@@ -350,13 +365,13 @@
                 contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: [
                     { type: "text", text: "山林境界合意完了", weight: "bold", color: "#00B900", size: "lg" },
                     { type: "text", text: `地番：${plot.parcel_number}`, size: "sm", margin: "md" },
-                    { type: "text", text: "本証は公的な合意証憑として保管されます。", size: "xs", color: "#666666", wrap: true }
+                    { type: "text", text: "公文書形式の証明書が発行されました。", size: "xs", color: "#666666", wrap: true }
                 ]}, footer: { type: "box", layout: "vertical", contents: [
                     { type: "button", action: { type: "uri", label: "証明書を確認", uri: publicUrl }, style: "primary", color: "#00B900" }
                 ]}}
             }]);
         }
-        alert("境界合意証明書が発行されました。LINEメッセージをご確認ください。");
+        alert("証明書が発行されました。LINEメッセージをご確認ください。");
         window.location.reload();
     }
 
