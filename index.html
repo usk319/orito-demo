@@ -9,103 +9,85 @@
     <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
     <style>
-        :root { --green: #00B900; --web3: #8247E5; --blue: #007bff; --red: #ff4757; }
+        :root { --green: #00B900; --web3: #8247E5; --red: #ff4757; }
         body { margin: 0; font-family: sans-serif; background: #fff; overflow: hidden; height: 100vh; width: 100vw; }
         .view { display: none; height: 100vh; flex-direction: column; overflow-y: auto; }
         .view.active { display: flex; }
-        
-        /* 地図・スプリット */
-        #map-area { flex: 1; position: relative; width: 100%; min-height: 40vh; }
+        #map-area { flex: 1; position: relative; min-height: 40vh; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
         #detail-area { background: #fff; border-top: 5px solid var(--green); display: none; padding: 15px; overflow-y: auto; height: 60vh; }
         body.mode-split #detail-area { display: block; }
         body.mode-split #map-area { flex: 0.4; }
-
-        /* 署名エリア (2段) */
-        .sig-container { background: #f9f9f9; padding: 15px; border-radius: 15px; margin-bottom: 15px; }
-        .sig-label { font-size: 12px; color: #666; margin-bottom: 5px; text-align: left; }
-        .sig-box { border: 2px dashed #ccc; background: #fff; border-radius: 10px; touch-action: none; width: 100%; height: 120px; }
-        
+        .sig-container { background: #f9f9f9; padding: 15px; border-radius: 15px; margin-bottom: 10px; }
+        .sig-box { border: 2px dashed #ccc; background: #fff; border-radius: 10px; touch-action: none; width: 100%; height: 110px; }
         .btn { width: 100%; padding: 18px; border: none; border-radius: 14px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 10px; }
         .btn-primary { background: var(--green); color: white; }
-        .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 15px 0; }
-        .photo-item { position: relative; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; background: #eee; }
+        .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+        .photo-item { border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; background: #eee; }
         .photo-item img { width: 100%; height: 100%; object-fit: cover; }
         #pdf-progress { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; z-index: 10000; flex-direction: column; }
     </style>
 </head>
 <body>
 
-<div id="pdf-progress"><div style="color:var(--green); font-weight:bold;">証明書を生成中...</div></div>
+<div id="pdf-progress"><div style="color:var(--green); font-weight:bold;">証明書をLINEで送信中...</div></div>
 
 <div id="entry-view" class="view active" style="align-items:center; justify-content:center; padding:30px;">
     <h1 style="color:var(--green)">織杜 - ORITO</h1>
     <p>森林招待コードを入力してください</p>
-    <input type="text" id="invite-input" style="width:100%; padding:20px; font-size:24px; border:1px solid #ddd; border-radius:15px; text-align:center; letter-spacing:5px;" placeholder="CODE001">
+    <input type="text" id="invite-input" style="width:100%; padding:20px; font-size:24px; border:1px solid #ddd; border-radius:15px; text-align:center;" placeholder="CODE001">
     <button class="btn btn-primary" onclick="verifyCode()">境界を確認する</button>
 </div>
 
 <div id="kyc-view" class="view" style="padding:20px;">
     <h3>本人確認 & 現場記録</h3>
-    <div style="background:#f0f0f0; padding:20px; border-radius:15px; margin-bottom:20px;">
-        <p style="font-size:12px;">【必須】身分証明書 (eKYC)</p>
-        <button class="btn" style="background:#fff;" onclick="document.getElementById('file-kyc').click()">📷 カメラを起動</button>
-        <input type="file" id="file-kyc" accept="image/*" capture="environment" style="display:none" onchange="handlePreview(this, 'preview-kyc')">
-        <img id="preview-kyc" style="width:100%; margin-top:10px; display:none; border-radius:10px;">
-    </div>
+    <button class="btn" style="background:#eee;" onclick="document.getElementById('file-kyc').click()">📷 カメラを起動</button>
+    <input type="file" id="file-kyc" accept="image/*" capture="environment" style="display:none" onchange="handlePreview(this, 'preview-kyc')">
+    <img id="preview-kyc" style="width:100%; margin-top:10px; display:none; border-radius:10px;">
     <button class="btn btn-primary" onclick="changeView('map-view')">地図を確認する</button>
 </div>
 
 <div id="map-view" class="view">
     <div id="map-area"><div id="map"></div></div>
     <div id="detail-area">
-        <h2 id="parcel-name" style="margin:0;">地番：---</h2>
+        <h2 id="parcel-name">地番：---</h2>
         <div id="photo-list" class="photo-grid"></div>
-        <textarea id="owner-msg" style="width:100%; height:80px; border-radius:10px; border:1px solid #ddd; padding:10px;" placeholder="メッセージ"></textarea>
-        <button class="btn btn-primary" onclick="changeView('agree-view')">この内容で合意する</button>
+        <textarea id="owner-msg" style="width:100%; height:60px; border-radius:10px; border:1px solid #ddd; padding:10px;" placeholder="メッセージ"></textarea>
+        <button class="btn btn-primary" onclick="changeView('agree-view')">合意署名へ進む</button>
         <button class="btn" style="background:#eee;" onclick="closeDetail()">✕ 閉じる</button>
     </div>
 </div>
 
 <div id="agree-view" class="view" style="padding:20px; text-align:center;">
     <h3>デジタル署名</h3>
-    <p id="sign-role" style="color:var(--web3); font-weight:bold;"></p>
-    
+    <p id="sign-role" style="font-weight:bold; color:var(--web3);"></p>
     <div class="sig-container">
-        <div class="sig-label">苗字 (Surname)</div>
+        <div style="font-size:12px; text-align:left;">苗字</div>
         <canvas id="sig-surname" class="sig-box"></canvas>
-        <div class="sig-label" style="margin-top:15px;">名前 (Given Name)</div>
+        <div style="font-size:12px; text-align:left; margin-top:10px;">名前</div>
         <canvas id="sig-given" class="sig-box"></canvas>
     </div>
-    
     <button onclick="clearSigs()" style="border:none; background:none; color:var(--red);">書き直す</button>
-    <button class="btn btn-primary" style="background:var(--web3);" onclick="finalizeRelay()">署名して証明書を発行</button>
+    <button class="btn btn-primary" style="background:var(--web3);" onclick="finalizeRelay()">署名してPDFを発行</button>
 </div>
 
 <div id="pdf-overlay" style="position:fixed; top:0; left:20000px; width:210mm;"><div id="pdf-template"></div></div>
 
 <script>
-    const supabaseClient = window.supabase.createClient('https://sivtcscuecjmcamwephp.supabase.co', 'sb_publishable_3wgWWsFaDfQ2-0QwmV8eBw_PpCFhMP4');
-    let targetData, mapInstance, sigSurname, sigGiven, isA = true;
+    // ★エラー修正：成功した方のURLとKeyに統一
+    const supabaseClient = window.supabase.createClient('https://uggpclqqyaailuadgzxv.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnZ3BjbHFxeWFhaWx1YWRnenh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzE0NTgsImV4cCI6MjA5MDEwNzQ1OH0.jY5jJuJUgwbIZm8y-jJvEH27eAP9m9semR3MbLxVxGo');
+    let targetData, mapInstance, sigSurnameCtx, sigGivenCtx, isA = true;
 
     async function init() {
-        try { await liff.init({ liffId: "2009576392-AWOZ1pmV" }); } catch(e) {}
-    }
-
-    function getUrls(data) {
-        if (!data) return [];
-        if (Array.isArray(data)) return data.filter(u => String(u).startsWith('http'));
-        const matches = String(data).match(/https?:\/\/[^\s,"{}]+/g);
-        return matches ? matches.map(u => u.replace(/[\]\}\s,]+$/, '')) : [];
+        try { await liff.init({ liffId: "2009576392-CvuNETRQ" }); } catch(e) {}
     }
 
     async function verifyCode() {
         const code = document.getElementById('invite-input').value.toUpperCase().trim();
         const { data, error } = await supabaseClient.from('forest_plots').select('*').eq('invitation_code', code).single();
-        if (error || !data) return alert("無効なコードです");
+        if (error || !data) return alert("招待コードが無効です。Supabaseのデータを確認してください。");
         targetData = data;
         isA = !data.sig_a_done;
         document.getElementById('sign-role').innerText = isA ? "【甲：地権者】として署名" : "【乙：隣接者】として署名";
@@ -116,12 +98,9 @@
         if (mapInstance) return;
         mapInstance = new maplibregl.Map({
             container: 'map',
-            style: { 
-                "version": 8, 
-                "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+            style: { "version": 8, "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
                 "sources": { "gsi": { "type": "raster", "tiles": ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"], "tileSize": 256 } }, 
-                "layers": [{ "id": "gsi", "type": "raster", "source": "gsi" }] 
-            },
+                "layers": [{ "id": "gsi", "type": "raster", "source": "gsi" }] },
             center: [131.39, 31.99], zoom: 17, preserveDrawingBuffer: true
         });
 
@@ -134,18 +113,8 @@
             mapInstance.addLayer({ 'id': 'fill', 'type': 'fill', 'source': 'plot-src', 'paint': { 'fill-opacity': 0.2, 'fill-color': color } });
             mapInstance.addLayer({ 'id': 'line', 'type': 'line', 'source': 'plot-src', 'paint': { 'line-color': color, 'line-width': 4 } });
 
-            const photos = getUrls(targetData.evidence_photo_url);
-            let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
-            const pointFeatures = photos.map((url, i) => {
-                const step = Math.floor((i / photos.length) * (ring.length - 1));
-                return { "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[step] }, "properties": { "idx": (i + 1).toString() } };
-            });
-
-            mapInstance.addSource('pts-src', { 'type': 'geojson', 'data': { "type": "FeatureCollection", "features": pointFeatures } });
-            mapInstance.addLayer({ 'id': 'pts-c', 'type': 'circle', 'source': 'pts-src', 'paint': { 'circle-radius': 12, 'circle-color': '#007bff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
-            mapInstance.addLayer({ 'id': 'pts-l', 'type': 'symbol', 'source': 'pts-src', 'layout': { 'text-field': ['get', 'idx'], 'text-size': 11 }, 'paint': { 'text-color': '#fff' } });
-
             mapInstance.on('click', 'fill', showDetail);
+            const ring = myFeat.geometry.coordinates[0][0] || myFeat.geometry.coordinates[0];
             const bounds = new maplibregl.LngLatBounds();
             ring.forEach(c => bounds.extend(c));
             mapInstance.fitBounds(bounds, { padding: 50 });
@@ -154,8 +123,6 @@
 
     function showDetail() {
         document.getElementById('parcel-name').innerText = `地番：${targetData.parcel_number}`;
-        const urls = getUrls(targetData.evidence_photo_url);
-        document.getElementById('photo-list').innerHTML = urls.map((u, i) => `<div class="photo-item"><img src="${u}"></div>`).join('');
         document.body.classList.add('mode-split');
         setTimeout(() => mapInstance.resize(), 300);
     }
@@ -172,8 +139,7 @@
     function initDoubleSignature() {
         const setup = (id) => {
             const canvas = document.getElementById(id);
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
+            canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight;
             const ctx = canvas.getContext('2d');
             let drawing = false;
             const getPos = (e) => {
@@ -188,8 +154,8 @@
             ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.strokeStyle = "#000";
             return ctx;
         };
-        sigSurname = setup('sig-surname');
-        sigGiven = setup('sig-given');
+        sigSurnameCtx = setup('sig-surname');
+        sigGivenCtx = setup('sig-given');
     }
 
     function clearSigs() {
@@ -199,53 +165,64 @@
 
     async function finalizeRelay() {
         document.getElementById('pdf-progress').style.display = 'flex';
-        // 苗字と名前を結合して1つの画像として保存
         const combined = document.createElement('canvas');
         combined.width = 300; combined.height = 300;
         const cctx = combined.getContext('2d');
+        cctx.fillStyle = "white"; cctx.fillRect(0,0,300,300);
         cctx.drawImage(document.getElementById('sig-surname'), 0, 0, 300, 150);
         cctx.drawImage(document.getElementById('sig-given'), 0, 150, 300, 150);
-        const sigData = combined.toDataURL();
+        const sigData = combined.toDataURL("image/png");
 
         const updateFields = isA ? { sig_a_done: true, sig_a_data: sigData } : { sig_b_done: true, sig_b_data: sigData, is_agreed: true };
         await supabaseClient.from('forest_plots').update(updateFields).eq('id', targetData.id);
         
-        // 最新データを再取得してPDF生成
-        const { data: updatedPlot } = await supabaseClient.from('forest_plots').select('*').eq('id', targetData.id).single();
-        if (updatedPlot.sig_a_done && updatedPlot.sig_b_done) {
-            await generateCertificate(updatedPlot);
+        const { data: updated } = await supabaseClient.from('forest_plots').select('*').eq('id', targetData.id).single();
+        if (updated.sig_a_done && updated.sig_b_done) {
+            await generateAndSendPDF(updated);
+        } else {
+            alert("署名を保存しました。お隣さんの署名を待ちます。");
+            location.reload();
         }
-        
-        alert("署名を記録しました。");
-        location.reload();
     }
 
-    async function generateCertificate(plot) {
+    async function generateAndSendPDF(plot) {
         const template = document.getElementById('pdf-template');
         template.innerHTML = `
-            <div style="padding:20mm; background:white; color:#333; font-family:serif;">
-                <h1 style="text-align:center; border-bottom:2px solid #00B900; padding-bottom:10px;">山林境界合意証明書</h1>
-                <p>地番：${plot.parcel_number}</p>
-                <div style="display:flex; justify-content: space-around; margin-top:50px;">
-                    <div style="text-align:center; border:1px solid #eee; padding:20px;">
-                        <p style="font-size:12px; color:#999;">地権者 (甲) 署名</p>
+            <div style="padding:20mm; background:white; font-family:serif;">
+                <h1 style="text-align:center; border-bottom:3px solid #00B900;">山林境界合意証明書</h1>
+                <p style="font-size:18px;">地番：${plot.parcel_number}</p>
+                <div style="display:flex; justify-content:space-around; margin-top:50px;">
+                    <div style="text-align:center; border:1px solid #000; padding:10px; width:120px;">
+                        <p style="font-size:10px;">甲：署名印</p>
                         <img src="${plot.sig_a_data}" style="width:100px; height:100px; object-fit:contain;">
                     </div>
-                    <div style="text-align:center; border:1px solid #eee; padding:20px;">
-                        <p style="font-size:12px; color:#999;">隣接者 (乙) 署名</p>
+                    <div style="text-align:center; border:1px solid #000; padding:10px; width:120px;">
+                        <p style="font-size:10px;">乙：署名印</p>
                         <img src="${plot.sig_b_data}" style="width:100px; height:100px; object-fit:contain;">
                     </div>
                 </div>
-                <div style="margin-top:50px; text-align:center;">
-                    <p>上記、両名の合意を確認いたしました。</p>
-                    <p style="font-size:20px; font-weight:bold; color:var(--green);">織杜 - ORITO SYSTEM</p>
-                </div>
+                <div style="margin-top:50px; text-align:center; color:#00B900; font-weight:bold;">織杜 - ORITO SYSTEM 認証済み</div>
             </div>`;
+        
         const pdfBlob = await html2pdf().set({ margin:0, html2canvas:{scale:2}, jsPDF:{unit:'mm', format:'a4'} }).from(template).output('blob');
         const fileName = `Cert_${plot.id}.pdf`;
         await supabaseClient.storage.from('pdfs').upload(fileName, pdfBlob, {contentType:'application/pdf', upsert:true});
         const { data: { publicUrl } } = supabaseClient.storage.from('pdfs').getPublicUrl(fileName);
-        console.log("PDF generated:", publicUrl);
+
+        // ★LINEへ自動送信
+        if (liff.isInClient()) {
+            await liff.sendMessages([{
+                type: "flex", altText: "証明書が発行されました",
+                contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: [
+                    { type: "text", text: "境界合意証明書", weight: "bold", size: "xl", color: "#00B900" },
+                    { type: "text", text: `地番：${plot.parcel_number}`, size: "sm" }
+                ]}, footer: { type: "box", layout: "vertical", contents: [
+                    { type: "button", action: { type: "uri", label: "証明書を表示", uri: publicUrl }, style: "primary", color: "#00B900" }
+                ]}}
+            }]);
+        }
+        alert("証明書をLINEで送信しました。");
+        location.reload();
     }
 
     function handlePreview(input, id) {
