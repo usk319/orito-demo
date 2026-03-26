@@ -38,14 +38,13 @@
 </head>
 <body>
 
-<div id="pdf-progress"><div style="color:var(--green); font-size:20px;">更新中...</div></div>
+<div id="pdf-progress"><div id="progress-text" style="color:var(--green); font-size:20px;">更新中...</div></div>
 
 <div id="entry-view" class="view active" style="align-items:center; justify-content:center; padding:30px;">
     <h1 style="color:var(--green)">織杜 - ORITO</h1>
     <p>森林招待コードを入力してください</p>
     <input type="text" id="invite-input" class="input-field" style="text-align:center; font-size:24px; letter-spacing:5px;" placeholder="ORITO1">
     <button class="btn btn-primary" onclick="verifyCode()">境界を確認する</button>
-    
     <button class="btn btn-outline" style="margin-top:40px;" onclick="resetDemoData()">デモ用：この土地を初期化</button>
 </div>
 
@@ -68,8 +67,8 @@
         <h2 id="parcel-name" style="margin:0;">地番：---</h2>
         <div id="photo-list" class="photo-grid"></div>
         <textarea id="owner-msg" class="input-field" style="height:60px;" placeholder="要望・メッセージがあれば入力"></textarea>
-        <button class="btn btn-primary" onclick="changeView('agree-view')">合意署名へ進む</button>
-        <button class="btn btn-danger" onclick="finalizeProcess(false)">今回は合意しない</button>
+        <button id="btn-agree-start" class="btn btn-primary" onclick="changeView('agree-view')">合意署名へ進む</button>
+        <button id="btn-disagree" class="btn btn-danger" onclick="finalizeProcess(false)">今回は合意しない</button>
         <button class="btn" style="background:#eee;" onclick="closeDetail()">✕ 閉じる</button>
     </div>
 </div>
@@ -116,8 +115,14 @@
         if (error || !data) return alert("招待コードが無効です。");
         targetData = data;
         
-        // 判定ロジック：甲の署名がない or 自分が甲として以前署名したなら「所有者」
-        isOwner = !data.sig_a_done || (data.owner_line_id === lineUserId && lineUserId !== "");
+        // ★役割判定ロジックの修正: sig_a_doneが完了していれば自動的に「乙」
+        if (!data.sig_a_done) {
+            isOwner = true;
+        } else if (data.sig_a_done && !data.sig_b_done) {
+            isOwner = false;
+        } else {
+            return alert("この土地の合意手続きは既に完了しています。");
+        }
         
         const roleName = isOwner ? "【所有者（甲）】" : "【隣接所有者（乙）】";
         document.getElementById('sign-role').innerText = roleName + "として署名します";
@@ -129,11 +134,13 @@
         changeView('kyc-view');
     }
 
-    // ★リセット機能
     async function resetDemoData() {
         const code = document.getElementById('invite-input').value.toUpperCase().trim();
         if (!code) return alert("初期化したいコードを入力してください");
-        if (!confirm(code + " のデータをリセットしますか？")) return;
+        if (!confirm(code + " のデータを完全にリセットしますか？")) return;
+
+        document.getElementById('pdf-progress').style.display = 'flex';
+        document.getElementById('progress-text').innerText = "リセット中...";
 
         const { error } = await supabaseClient.from('forest_plots').update({
             sig_a_done: false, sig_a_data: null, owner_line_id: null, owner_address: null, owner_requests: null,
@@ -141,9 +148,12 @@
             is_agreed: null
         }).eq('invitation_code', code);
 
-        if (error) alert("エラー: " + error.message);
-        else alert(code + " を初期状態（赤色）に戻しました。");
-        location.reload();
+        if (error) {
+            alert("エラー: " + error.message);
+        } else {
+            alert(code + " を初期状態（赤色）に戻しました。ページを再読み込みします。");
+            window.location.reload(); // ★強制リロードで地図と状態をクリア
+        }
     }
 
     function initMap() {
@@ -160,17 +170,17 @@
             const { data: geoData } = await supabaseClient.rpc('get_forest_geojson');
             const filtered = geoData.features.filter(f => {
                 const p = f.properties;
-                if (p.id === targetData.id) return true;
-                if (lineUserId && (p.owner_line_id === lineUserId || p.adjacent_line_id === lineUserId)) return true;
-                return false;
+                // 今の土地か、自分が関わった土地のみ
+                return p.id === targetData.id || p.owner_line_id === lineUserId || p.adjacent_line_id === lineUserId;
             });
 
+            // 着色ロジックの修正: NULLを明示的に赤にする
             const colorExpr = [
                 'case',
-                ['==', ['get', 'is_agreed'], false], '#ff4757', // 否認
-                ['all', ['==', ['get', 'sig_a_done'], true], ['==', ['get', 'sig_b_done'], true]], '#00B900', // 完了
-                ['==', ['get', 'sig_a_done'], true], '#FFD32A', // 進行中
-                '#ff4757' // 未着手
+                ['==', ['get', 'is_agreed'], false], '#ff4757',
+                ['all', ['==', ['get', 'sig_a_done'], true], ['==', ['get', 'sig_b_done'], true]], '#00B900',
+                ['==', ['get', 'sig_a_done'], true], '#FFD32A',
+                '#ff4757'
             ];
 
             mapInstance.addSource('plot-src', { 'type': 'geojson', 'data': { type: "FeatureCollection", features: filtered } });
@@ -181,10 +191,10 @@
             const myFeat = filtered.find(f => f.properties.id === targetData.id);
             if(myFeat) {
                 let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
-                const pointFeatures = photos.map((url, i) => {
-                    const step = Math.floor((i / photos.length) * (ring.length - 1));
-                    return { "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[step] }, "properties": { "idx": (i + 1).toString() } };
-                });
+                const pointFeatures = photos.map((url, i) => ({
+                    "type": "Feature", "geometry": { "type": "Point", "coordinates": ring[Math.floor((i / photos.length) * (ring.length - 1))] },
+                    "properties": { "idx": (i + 1).toString() }
+                }));
                 mapInstance.addSource('pts-src', { 'type': 'geojson', 'data': { "type": "FeatureCollection", "features": pointFeatures } });
                 mapInstance.addLayer({ 'id': 'pts-c', 'type': 'circle', 'source': 'pts-src', 'paint': { 'circle-radius': 12, 'circle-color': '#007bff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
                 mapInstance.addLayer({ 'id': 'pts-l', 'type': 'symbol', 'source': 'pts-src', 'layout': { 'text-field': ['get', 'idx'], 'text-size': 11 }, 'paint': { 'text-color': '#fff' } });
@@ -231,9 +241,7 @@
             let drawing = false;
             const getPos = (e) => {
                 const rect = canvas.getBoundingClientRect();
-                const cx = e.touches ? e.touches[0].clientX : e.clientX;
-                const cy = e.touches ? e.touches[0].clientY : e.clientY;
-                return { x: cx - rect.left, y: cy - rect.top };
+                return { x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left, y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top };
             };
             canvas.addEventListener('touchstart', (e) => { drawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); e.preventDefault(); });
             canvas.addEventListener('touchmove', (e) => { if(!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); });
@@ -277,7 +285,7 @@
             await generateAndSendPDF(updated);
         } else {
             alert(isAgreed ? "署名を記録しました。" : "否認を記録しました。");
-            location.reload();
+            window.location.reload();
         }
     }
 
@@ -289,8 +297,8 @@
             <div style="padding:15mm; font-family: serif; line-height:1.4; background:white; color:#000;">
                 <h1 style="text-align:center; text-decoration:underline;">山林境界合意並びに森林現況確認証明書</h1>
                 <table style="width:100%; border-collapse:collapse; margin:10px 0; border:2px solid #000;">
-                    <tr><td style="background:#eee; padding:8px; border:1px solid #000; width:20%;">地番</td><td colspan="3" style="padding:8px; border:1px solid #000; font-weight:bold;">${plot.parcel_number}</td></tr>
-                    <tr><td style="background:#eee; padding:8px; border:1px solid #000;">面積</td><td style="padding:8px; border:1px solid #000;">${plot.area_ha} ha</td><td style="background:#eee; padding:8px; border:1px solid #000;">樹種</td><td style="padding:8px; border:1px solid #000;">${plot.tree_species || 'スギ'}</td></tr>
+                    <tr><td style="background:#eee; padding:10px; border:1px solid #000; width:20%;">地番</td><td colspan="3" style="padding:10px; border:1px solid #000; font-weight:bold;">${plot.parcel_number}</td></tr>
+                    <tr><td style="background:#eee; padding:10px; border:1px solid #000;">面積</td><td style="padding:10px; border:1px solid #000;">${plot.area_ha} ha</td><td style="background:#eee; padding:10px; border:1px solid #000;">樹種</td><td style="padding:10px; border:1px solid #000;">${plot.tree_species || 'スギ'}</td></tr>
                 </table>
                 <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4;">■ 境界確認図</h4>
                 <img src="${mapImg}" style="width:100%; height:320px; object-fit:cover; border:1px solid #000;">
@@ -298,28 +306,23 @@
                 <h4 style="border-left:5px solid #00B900; padding-left:10px; background:#f4f4f4;">■ 合意署名</h4>
                 <div style="display:flex; justify-content:space-around; margin-top:20px;">
                     <div style="text-align:center; width:45%;">
-                        <div style="min-height:260px; border:1px solid #eee; padding:10px; position:relative;">
+                        <div style="min-height:280px; border:1px solid #eee; padding:10px; position:relative;">
                             <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.3;">所有者印</div>
-                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:60px; line-height:1.2;">
-                                <b>住所：</b><br>${plot.owner_address || '---'}
-                            </div>
+                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:60px; line-height:1.2;"><b>住所：</b><br>${plot.owner_address || '---'}</div>
                             <img src="${plot.sig_a_data}" style="width:120px; margin-top:10px; object-fit:contain;">
                         </div>
                         <p style="font-weight:bold; margin-top:5px;">所有者（甲）</p>
                     </div>
                     <div style="text-align:center; width:45%;">
-                        <div style="min-height:260px; border:1px solid #eee; padding:10px; position:relative;">
+                        <div style="min-height:280px; border:1px solid #eee; padding:10px; position:relative;">
                             <div style="width:80px; height:80px; border:2px solid red; border-radius:50%; display:flex; align-items:center; justify-content:center; color:red; font-size:10px; font-weight:bold; margin:0 auto; opacity:0.3;">隣接者印</div>
-                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:60px; line-height:1.2;">
-                                <b>住所：</b><br>${plot.adjacent_address || '---'}
-                            </div>
+                            <div style="text-align:left; font-size:11px; margin-top:10px; min-height:60px; line-height:1.2;"><b>住所：</b><br>${plot.adjacent_address || '---'}</div>
                             <img src="${plot.sig_b_data}" style="width:120px; margin-top:10px; object-fit:contain;">
                         </div>
                         <p style="font-weight:bold; margin-top:5px;">隣接所有者（乙）</p>
                     </div>
                 </div>
                 <div id="pdf-photo-area" style="display:flex; flex-wrap:wrap; justify-content:space-between; margin-top:20px;"></div>
-                <div style="margin-top:20px; font-size:11px; border:1px solid #ddd; padding:10px;"><b>備考：</b>${plot.owner_requests || 'なし'}</div>
             </div>`;
         
         const urls = getUrls(plot.evidence_photo_url);
@@ -350,7 +353,7 @@
             }]);
         }
         alert("証明書をLINEで送信しました。");
-        location.reload();
+        window.location.reload();
     }
 
     function handlePreview(input, id) {
