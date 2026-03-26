@@ -9,29 +9,42 @@
     <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@web3auth/modal@7.3.2/dist/modal.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
     <style>
         :root { --red: #FF4757; --yellow: #FFD32A; --green: #00B900; --web3: #8247E5; }
         body { margin: 0; font-family: sans-serif; background: #f8f9fa; color: #333; overflow: hidden; height: 100vh; }
         .view { display: none; height: 100vh; flex-direction: column; overflow-y: auto; }
         .view.active { display: flex; }
+        
+        /* 入力エリア */
         #entry-view, #kyc-view { align-items: center; justify-content: center; padding: 30px; text-align: center; background: white; }
         .input-code { width: 100%; padding: 20px; font-size: 24px; border: 2px solid #ddd; border-radius: 15px; margin: 20px 0; text-align: center; letter-spacing: 5px; }
-        #map { flex: 1; width: 100%; min-height: 50vh; }
+        
+        /* 地図エリア */
+        #map-area { flex: 1; position: relative; width: 100%; min-height: 40vh; }
+        #map { position: absolute; top:0; bottom:0; width:100%; }
+
+        /* 詳細表示（スプリット） */
+        #detail-area { background: #fff; border-top: 5px solid var(--green); display: none; padding: 15px; overflow-y: auto; height: 50vh; }
+        body.mode-split #detail-area { display: block; }
+        
         .upload-card { border: 2px dashed #ccc; border-radius: 15px; padding: 20px; background: #fff; margin-bottom: 15px; width: 100%; }
         .preview-img { width: 100%; border-radius: 10px; margin-top: 10px; display: none; border: 1px solid #eee; }
         #sig-canvas { border: 2px dashed #ccc; background: #fff; border-radius: 12px; touch-action: none; width: 100%; height: 150px; }
+        
         .btn { width: 100%; padding: 18px; border: none; border-radius: 14px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 10px; }
         .btn-primary { background: var(--green); color: white; }
         .btn-web3 { background: var(--web3); color: white; }
-        #pdf-progress { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 10000; }
+        
+        /* 写真グリッド */
+        .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .photo-item { position: relative; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; background: #eee; }
+        .photo-item img { width: 100%; height: 100%; object-fit: cover; }
+        .photo-badge { position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
-
-<div id="pdf-progress"><div style="font-weight:bold; color:var(--web3);">ブロックチェーンに刻印中...</div></div>
 
 <div id="entry-view" class="view active">
     <h1 style="color:var(--green)">織杜 - ORITO</h1>
@@ -41,29 +54,31 @@
 </div>
 
 <div id="kyc-view" class="view">
-    <h3 id="kyc-title">本人確認 & 現場記録</h3>
+    <h3>本人確認 & 現場記録</h3>
     <div class="upload-card">
         <p style="font-size:12px;">【必須】身分証明書 (eKYC)</p>
-        <button class="btn" style="background:#eee;" onclick="document.getElementById('file-kyc').click()">📷 撮影する</button>
-        <input type="file" id="file-kyc" accept="image/*" style="display:none" onchange="handlePreview(this, 'preview-kyc')">
+        <button class="btn" style="background:#f0f0f0;" onclick="document.getElementById('file-kyc').click()">📷 カメラを起動</button>
+        <input type="file" id="file-kyc" accept="image/*" capture="environment" style="display:none" onchange="handlePreview(this, 'preview-kyc')">
         <img id="preview-kyc" class="preview-img">
     </div>
     <div class="upload-card">
         <p style="font-size:12px;">【任意】現場の追加状況写真</p>
-        <button class="btn" style="background:#eee;" onclick="document.getElementById('file-site').click()">📷 現場を撮る</button>
-        <input type="file" id="file-site" accept="image/*" style="display:none" onchange="handlePreview(this, 'preview-site')">
+        <button class="btn" style="background:#f0f0f0;" onclick="document.getElementById('file-site').click()">📷 現場を撮る</button>
+        <input type="file" id="file-site" accept="image/*" capture="environment" style="display:none" onchange="handlePreview(this, 'preview-site')">
         <img id="preview-site" class="preview-img">
     </div>
-    <button class="btn btn-primary" id="btn-to-map" onclick="changeView('map-view')">地図を確認する</button>
+    <button class="btn btn-primary" onclick="changeView('map-view')">地図で境界点を確認</button>
 </div>
 
-<div id="map-view" class="view" style="position:relative;">
-    <div id="map"></div>
-    <div id="map-detail" style="padding:20px; background:white; border-top:5px solid var(--green); display:none;">
+<div id="map-view" class="view">
+    <div id="map-area"><div id="map"></div></div>
+    <div id="detail-area">
         <h4 id="parcel-num" style="margin:0;">地番: ---</h4>
-        <p id="progress-status" style="font-size:12px; font-weight:bold; margin:5px 0;"></p>
-        <textarea id="owner-msg" style="width:100%; border-radius:10px; border:1px solid #ddd; padding:10px;" placeholder="要望・メッセージ"></textarea>
+        <p id="progress-status" style="font-size:12px; font-weight:bold;"></p>
+        <div id="existing-photos" class="photo-grid"></div>
+        <textarea id="owner-msg" style="width:100%; height:60px; border-radius:10px; border:1px solid #ddd; padding:10px;" placeholder="要望・メッセージ"></textarea>
         <button class="btn btn-primary" onclick="changeView('agree-view')">この境界で合意する</button>
+        <button class="btn" style="background:#eee;" onclick="closeDetail()">✕ 閉じる</button>
     </div>
 </div>
 
@@ -72,58 +87,107 @@
     <p id="sign-role" style="font-size:13px; color:var(--web3); font-weight:bold;"></p>
     <canvas id="sig-canvas"></canvas>
     <button onclick="clearSig()" style="border:none; background:none; color:red; font-size:12px;">書き直す</button>
-    <div style="font-size:10px; color:#999; margin-top:10px;">※LINEログイン情報を元に分散型ID(Web3)で署名されます。</div>
-    <button class="btn btn-web3" onclick="finalizeRelay()">署名して証明書を発行</button>
+    <button class="btn btn-web3" onclick="finalizeRelay()">署名してデジタル証明書を発行</button>
 </div>
 
-<div id="pdf-overlay" style="position:fixed; top:0; left:20000px; width:210mm;"><div id="pdf-template"></div></div>
-
 <script>
-    // --- 1. 接続情報を定義 (名前を supabaseClient にして衝突回避) ---
-    const CLIENT_ID = "BKbQ1gC-tbzGfCZwx__t5Mj5B6ibWyKosL3DAiyyCrj4PiXvOqY40yrwzOTNQ997eRXYH9EJz69X7rPPrw0Z_yo";
     const supabaseClient = window.supabase.createClient('https://uggpclqqyaailuadgzxv.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnZ3BjbHFxeWFhaWx1YWRnenh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzE0NTgsImV4cCI6MjA5MDEwNzQ1OH0.jY5jJuJUgwbIZm8y-jJvEH27eAP9m9semR3MbLxVxGo');
     
-    let targetData, userProfile, web3auth, isA = true;
-    let sigCanvas, sigCtx, mapInstance;
+    let targetData, mapInstance, pointFeatures = [];
+    let sigCanvas, sigCtx, isA = true;
 
     async function init() {
-        try {
-            await liff.init({ liffId: "2009576392-CvuNETRQ" });
-            if (liff.isLoggedIn()) userProfile = await liff.getProfile();
-        } catch(e) { console.error("LIFF init error", e); }
+        try { await liff.init({ liffId: "2009576392-CvuNETRQ" }); } catch(e) {}
         initSignature();
     }
 
-    async function verifyCode() {
-        const inputField = document.getElementById('invite-input');
-        if (!inputField) return alert("エラー: 入力欄が見つかりません");
-        
-        const code = inputField.value.toUpperCase().trim();
-        alert("【デバッグ1】入力されたコード: " + code);
-
-        try {
-            const { data, error } = await supabaseClient
-                .from('forest_plots')
-                .select('*')
-                .eq('invitation_code', code)
-                .single();
-
-            if (error) {
-                alert("【デバッグ2: Supabaseエラー】\n" + error.message);
-                return;
-            }
-            if (!data) {
-                alert("【デバッグ3】コードが見つかりません。");
-                return;
-            }
-
-            alert("【成功！】" + data.parcel_number + " を見つけました。");
-            targetData = data;
-            isA = !data.sig_a_done;
-            changeView('kyc-view');
-        } catch (err) { alert("【デバッグ4: エラー】\n" + err.message); }
+    // 補助関数：URL抽出
+    function getUrls(data) {
+        if (!data) return [];
+        if (Array.isArray(data)) return data.filter(u => String(u).startsWith('http'));
+        const matches = String(data).match(/https?:\/\/[^\s,"{}]+/g);
+        return matches ? matches.map(u => u.replace(/[\]\}\s,]+$/, '')) : [];
     }
 
+    async function verifyCode() {
+        const code = document.getElementById('invite-input').value.toUpperCase().trim();
+        const { data, error } = await supabaseClient.from('forest_plots').select('*').eq('invitation_code', code).single();
+        if (error || !data) return alert("無効なコードです");
+        targetData = data;
+        isA = !data.sig_a_done;
+        document.getElementById('sign-role').innerText = isA ? "あなたは【甲：地権者】として署名します" : "あなたは【乙：隣接者】として署名します";
+        changeView('kyc-view');
+    }
+
+    function initMap() {
+        if (mapInstance) return;
+        mapInstance = new maplibregl.Map({
+            container: 'map',
+            style: { "version": 8, "sources": { "gsi": { "type": "raster", "tiles": ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"], "tileSize": 256 } }, "layers": [{ "id": "gsi", "type": "raster", "source": "gsi" }] },
+            center: [131.39, 31.99], zoom: 17, preserveDrawingBuffer: true
+        });
+
+        mapInstance.on('load', async () => {
+            const { data: geoData } = await supabaseClient.rpc('get_forest_geojson');
+            const myFeat = geoData.features.find(f => f.properties.id === targetData.id);
+            
+            // 色決定
+            const color = targetData.is_agreed ? "#00B900" : (targetData.sig_a_done ? "#FFD32A" : "#FF4757");
+
+            // ポリゴン描画
+            mapInstance.addSource('plot-src', { 'type': 'geojson', 'data': myFeat });
+            mapInstance.addLayer({ 'id': 'fill', 'type': 'fill', 'source': 'plot-src', 'paint': { 'fill-opacity': 0.1, 'fill-color': '#fff' } });
+            mapInstance.addLayer({ 'id': 'line', 'type': 'line', 'source': 'plot-src', 'paint': { 'line-color': color, 'line-width': 6 } });
+
+            // 以前のロジック：写真URLから境界線上にポイントを作成
+            const photos = getUrls(targetData.evidence_photo_url);
+            let ring = (myFeat.geometry.type === 'MultiPolygon') ? myFeat.geometry.coordinates[0][0] : myFeat.geometry.coordinates[0];
+            
+            pointFeatures = photos.map((url, i) => {
+                const step = Math.floor((i / photos.length) * (ring.length - 1));
+                return {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": ring[step] },
+                    "properties": { "idx": (i + 1).toString(), "url": url }
+                };
+            });
+
+            mapInstance.addSource('pts-src', { 'type': 'geojson', 'data': { "type": "FeatureCollection", "features": pointFeatures } });
+            mapInstance.addLayer({ 'id': 'pts-c', 'type': 'circle', 'source': 'pts-src', 'paint': { 'circle-radius': 12, 'circle-color': '#007bff', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+            mapInstance.addLayer({ 'id': 'pts-l', 'type': 'symbol', 'source': 'pts-src', 'layout': { 'text-field': ['get', 'idx'], 'text-size': 11 }, 'paint': { 'text-color': '#fff' } });
+
+            // クリックイベントの登録
+            mapInstance.on('click', 'fill', () => showDetail());
+            mapInstance.on('click', 'pts-c', () => showDetail());
+
+            // 範囲を自動調整
+            const bounds = new maplibregl.LngLatBounds();
+            ring.forEach(c => bounds.extend(c));
+            mapInstance.fitBounds(bounds, { padding: 50 });
+        });
+    }
+
+    function showDetail() {
+        document.getElementById('parcel-num').innerText = `地番: ${targetData.parcel_number}`;
+        const photos = getUrls(targetData.evidence_photo_url);
+        document.getElementById('existing-photos').innerHTML = photos.map((u, i) => `<div class="photo-item"><span class="photo-badge">No.${i+1}</span><img src="${u}"></div>`).join('');
+        
+        document.body.classList.add('mode-split');
+        setTimeout(() => mapInstance.resize(), 100);
+    }
+
+    function closeDetail() {
+        document.body.classList.remove('mode-split');
+        setTimeout(() => mapInstance.resize(), 100);
+    }
+
+    function changeView(id) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        if (id === 'map-view') setTimeout(initMap, 300);
+    }
+
+    // 写真プレビュー（カメラ用）
     function handlePreview(input, imgId) {
         const file = input.files[0];
         if (file) {
@@ -137,64 +201,7 @@
         }
     }
 
-    function initMap() {
-        mapInstance = new maplibregl.Map({
-            container: 'map',
-            style: { "version": 8, "sources": { "gsi": { "type": "raster", "tiles": ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"], "tileSize": 256 } }, "layers": [{ "id": "gsi", "type": "raster", "source": "gsi" }] },
-            center: [131.39, 31.99], zoom: 17, preserveDrawingBuffer: true
-        });
-
-        mapInstance.on('load', async () => {
-            const { data } = await supabaseClient.rpc('get_forest_geojson');
-            if (!data) return;
-            const feat = data.features.find(f => f.properties.id === targetData.id);
-            const color = targetData.is_agreed ? "#00B900" : (targetData.sig_a_done ? "#FFD32A" : "#FF4757");
-            
-            document.getElementById('progress-status').innerText = targetData.is_agreed ? "合意完了" : (targetData.sig_a_done ? "隣接者の署名待ち" : "未合意");
-            document.getElementById('progress-status').style.color = color;
-
-            mapInstance.addSource('p', { 'type': 'geojson', 'data': feat });
-            mapInstance.addLayer({ 'id': 'l', 'type': 'line', 'source': 'p', 'paint': { 'line-color': color, 'line-width': 6 } });
-            
-            mapInstance.on('click', 'l', () => {
-                document.getElementById('parcel-num').innerText = `地番: ${targetData.parcel_number}`;
-                document.getElementById('map-detail').style.display = 'block';
-                setTimeout(() => mapInstance.resize(), 100);
-            });
-        });
-    }
-
-    async function finalizeRelay() {
-        document.getElementById('pdf-progress').style.display = 'flex';
-        const sigImg = sigCanvas.toDataURL();
-        const msg = document.getElementById('owner-msg').value;
-
-        try {
-            let kycUrl = targetData.kyc_image_url;
-            const kycFile = document.getElementById('file-kyc').files[0];
-            if (kycFile) {
-                const path = `kyc/${targetData.id}_${isA?'A':'B'}.png`;
-                await supabaseClient.storage.from('kyc').upload(path, kycFile);
-                const { data } = supabaseClient.storage.from('kyc').getPublicUrl(path);
-                kycUrl = data.publicUrl;
-            }
-
-            const updateFields = isA 
-                ? { sig_a_done: true, sig_a_data: sigImg, owner_requests: msg, kyc_image_url: kycUrl }
-                : { sig_b_done: true, sig_b_data: sigImg, is_agreed: true };
-
-            await supabaseClient.from('forest_plots').update(updateFields).eq('id', targetData.id);
-            alert("記録が完了しました！");
-            location.reload();
-        } catch (e) { alert("Error: " + e.message); } finally { document.getElementById('pdf-progress').style.display = 'none'; }
-    }
-
-    function changeView(id) {
-        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-        document.getElementById(id).classList.add('active');
-        if (id === 'map-view') setTimeout(initMap, 200);
-    }
-
+    // 署名パッド初期化
     function initSignature() {
         sigCanvas = document.getElementById('sig-canvas');
         sigCtx = sigCanvas.getContext('2d');
@@ -203,16 +210,26 @@
         let drawing = false;
         const getPos = (e) => {
             const rect = sigCanvas.getBoundingClientRect();
-            return { x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left, y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top };
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
         };
         const start = (e) => { drawing = true; sigCtx.beginPath(); const p = getPos(e); sigCtx.moveTo(p.x, p.y); };
-        const move = (e) => { if(!drawing) return; const p = getPos(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); };
+        const move = (e) => { if(!drawing) return; const p = getPos(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); e.preventDefault(); };
         sigCanvas.addEventListener('mousedown', start); sigCanvas.addEventListener('mousemove', move); window.addEventListener('mouseup', () => drawing = false);
         sigCanvas.addEventListener('touchstart', start); sigCanvas.addEventListener('touchmove', move); window.addEventListener('touchend', () => drawing = false);
         sigCtx.lineWidth = 2; sigCtx.strokeStyle = "#333";
     }
-
     function clearSig() { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); }
+
+    async function finalizeRelay() {
+        // 更新処理（以前と同様）
+        const sigImg = sigCanvas.toDataURL();
+        const updateFields = isA ? { sig_a_done: true, sig_a_data: sigImg } : { sig_b_done: true, sig_b_data: sigImg, is_agreed: true };
+        await supabaseClient.from('forest_plots').update(updateFields).eq('id', targetData.id);
+        alert("完了しました");
+        location.reload();
+    }
 
     init();
 </script>
