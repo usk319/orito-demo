@@ -79,14 +79,13 @@
 <div id="pdf-overlay" style="position:fixed; top:0; left:20000px; width:210mm;"><div id="pdf-template"></div></div>
 
 <script>
-    // --- 提供されたキーの統合 ---
+    // --- 1. 接続情報を定義 (名前を supabaseClient にして衝突回避) ---
     const CLIENT_ID = "BKbQ1gC-tbzGfCZwx__t5Mj5B6ibWyKosL3DAiyyCrj4PiXvOqY40yrwzOTNQ997eRXYH9EJz69X7rPPrw0Z_yo";
-    const supabase = window.supabase.createClient('https://uggpclqqyaailuadgzxv.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnZ3BjbHFxeWFhaWx1YWRnenh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzE0NTgsImV4cCI6MjA5MDEwNzQ1OH0.jY5jJuJUgwbIZm8y-jJvEH27eAP9m9semR3MbLxVxGo');
+    const supabaseClient = window.supabase.createClient('https://uggpclqqyaailuadgzxv.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnZ3BjbHFxeWFhaWx1YWRnenh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzE0NTgsImV4cCI6MjA5MDEwNzQ1OH0.jY5jJuJUgwbIZm8y-jJvEH27eAP9m9semR3MbLxVxGo');
     
     let targetData, userProfile, web3auth, isA = true;
     let sigCanvas, sigCtx, mapInstance;
 
-    // --- 1. 初期化 ---
     async function init() {
         try {
             await liff.init({ liffId: "2009576392-CvuNETRQ" });
@@ -95,47 +94,36 @@
         initSignature();
     }
 
-    // --- 2. 招待コード検証 & 役割判定 ---
     async function verifyCode() {
-    const inputField = document.getElementById('invite-input');
-    if (!inputField) return alert("エラー: 入力欄(invite-input)が見つかりません");
-    
-    const code = inputField.value.toUpperCase().trim();
-    alert("【デバッグ1】入力されたコード: " + code); // スマホで入力が認識されているか確認
-
-    try {
-        // Supabaseへの問い合わせ開始
-        const { data, error } = await supabase
-            .from('forest_plots')
-            .select('*')
-            .eq('invitation_code', code)
-            .single();
-
-        if (error) {
-            console.error(error);
-            alert("【デバッグ2: Supabaseエラー】\n" + error.message + "\n(テーブル名やカラム名が正しいか確認してください)");
-            return;
-        }
-
-        if (!data) {
-            alert("【デバッグ3】このコードはDBに存在しません。");
-            return;
-        }
-
-        // 成功した場合
-        alert("【成功！】" + data.parcel_number + " を見つけました。次へ進みます。");
-        targetData = data;
-        isA = !data.sig_a_done;
+        const inputField = document.getElementById('invite-input');
+        if (!inputField) return alert("エラー: 入力欄が見つかりません");
         
-        // 画面切り替えの実行
-        changeView('kyc-view');
+        const code = inputField.value.toUpperCase().trim();
+        alert("【デバッグ1】入力されたコード: " + code);
 
-    } catch (err) {
-        alert("【デバッグ4: システムエラー】\n" + err.message);
+        try {
+            const { data, error } = await supabaseClient
+                .from('forest_plots')
+                .select('*')
+                .eq('invitation_code', code)
+                .single();
+
+            if (error) {
+                alert("【デバッグ2: Supabaseエラー】\n" + error.message);
+                return;
+            }
+            if (!data) {
+                alert("【デバッグ3】コードが見つかりません。");
+                return;
+            }
+
+            alert("【成功！】" + data.parcel_number + " を見つけました。");
+            targetData = data;
+            isA = !data.sig_a_done;
+            changeView('kyc-view');
+        } catch (err) { alert("【デバッグ4: エラー】\n" + err.message); }
     }
-}
 
-    // --- 3. 写真プレビュー ---
     function handlePreview(input, imgId) {
         const file = input.files[0];
         if (file) {
@@ -149,7 +137,6 @@
         }
     }
 
-    // --- 4. 地図表示 (3色) ---
     function initMap() {
         mapInstance = new maplibregl.Map({
             container: 'map',
@@ -158,15 +145,12 @@
         });
 
         mapInstance.on('load', async () => {
-            const { data } = await supabase.rpc('get_forest_geojson');
+            const { data } = await supabaseClient.rpc('get_forest_geojson');
+            if (!data) return;
             const feat = data.features.find(f => f.properties.id === targetData.id);
+            const color = targetData.is_agreed ? "#00B900" : (targetData.sig_a_done ? "#FFD32A" : "#FF4757");
             
-            // 3色ステータス判定
-            const isFinished = targetData.is_agreed;
-            const isWaiting = targetData.sig_a_done && !targetData.sig_b_done;
-            const color = isFinished ? "#00B900" : (isWaiting ? "#FFD32A" : "#FF4757");
-            
-            document.getElementById('progress-status').innerText = isFinished ? "合意完了" : (isWaiting ? "隣接者(乙)の署名待ち" : "未合意");
+            document.getElementById('progress-status').innerText = targetData.is_agreed ? "合意完了" : (targetData.sig_a_done ? "隣接者の署名待ち" : "未合意");
             document.getElementById('progress-status').style.color = color;
 
             mapInstance.addSource('p', { 'type': 'geojson', 'data': feat });
@@ -180,47 +164,37 @@
         });
     }
 
-    // --- 5. 最終合意実行 ---
     async function finalizeRelay() {
         document.getElementById('pdf-progress').style.display = 'flex';
         const sigImg = sigCanvas.toDataURL();
         const msg = document.getElementById('owner-msg').value;
 
         try {
-            // 写真をStorageへアップロード（簡易版: ファイルがあれば実行）
             let kycUrl = targetData.kyc_image_url;
             const kycFile = document.getElementById('file-kyc').files[0];
             if (kycFile) {
                 const path = `kyc/${targetData.id}_${isA?'A':'B'}.png`;
-                await supabase.storage.from('kyc').upload(path, kycFile);
-                const { data } = supabase.storage.from('kyc').getPublicUrl(path);
+                await supabaseClient.storage.from('kyc').upload(path, kycFile);
+                const { data } = supabaseClient.storage.from('kyc').getPublicUrl(path);
                 kycUrl = data.publicUrl;
             }
 
-            // DB更新
             const updateFields = isA 
                 ? { sig_a_done: true, sig_a_data: sigImg, owner_requests: msg, kyc_image_url: kycUrl }
                 : { sig_b_done: true, sig_b_data: sigImg, is_agreed: true };
 
-            await supabase.from('forest_plots').update(updateFields).eq('id', targetData.id);
-
-            // 乙の署名完了時にPDF発行とLINE通知
-            if (!isA) {
-                alert("両名の署名が揃いました！ブロックチェーンに刻印します。");
-                // ※ここでPDF生成ロジック(前述)を呼び出し
-            } else {
-                alert("あなたの署名を記録しました。お隣さんの署名を待ちます。");
-            }
+            await supabaseClient.from('forest_plots').update(updateFields).eq('id', targetData.id);
+            alert("記録が完了しました！");
             location.reload();
-        } catch (e) { alert("Error: " + e.message); }
+        } catch (e) { alert("Error: " + e.message); } finally { document.getElementById('pdf-progress').style.display = 'none'; }
     }
 
-    // --- UI/キャンバス制御 ---
     function changeView(id) {
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(id).classList.add('active');
         if (id === 'map-view') setTimeout(initMap, 200);
     }
+
     function initSignature() {
         sigCanvas = document.getElementById('sig-canvas');
         sigCtx = sigCanvas.getContext('2d');
@@ -237,6 +211,7 @@
         sigCanvas.addEventListener('touchstart', start); sigCanvas.addEventListener('touchmove', move); window.addEventListener('touchend', () => drawing = false);
         sigCtx.lineWidth = 2; sigCtx.strokeStyle = "#333";
     }
+
     function clearSig() { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); }
 
     init();
